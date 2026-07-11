@@ -39,7 +39,14 @@ class AttackDetector:
         self.BRUTE_FORCE_WINDOW = BRUTE_FORCE_WINDOW
         self.DDOS_THRESHOLD = DDOS_THRESHOLD
         self.DDOS_WINDOW = DDOS_WINDOW
-    
+        
+        # Define web ports (common HTTP/S)
+        self.WEB_PORTS = {80, 443, 8080, 8443}
+        
+        # Port scan suppression window (seconds) – skip web attack checks
+        # for IPs that have been flagged for port scanning recently.
+        self.PORT_SCAN_SUPPRESSION_WINDOW = 60  # 1 minute
+
     def _compile_patterns(self):
         """Compile attack detection patterns"""
         self.sql_patterns = [
@@ -84,7 +91,31 @@ class AttackDetector:
             re.compile(r'C:\\Windows\\System32'),
             re.compile(r'boot\.ini'),
         ]
-    
+
+    def _is_http_request(self, payload: str) -> bool:
+        """Check if the payload appears to be an HTTP request."""
+        if not payload:
+            return False
+        # Common HTTP methods at the start of the request line
+        http_methods = ('GET ', 'POST ', 'HEAD ', 'PUT ', 'DELETE ',
+                        'OPTIONS ', 'PATCH ', 'CONNECT ', 'TRACE ')
+        # Also check for HTTP protocol version string anywhere
+        return (payload.startswith(http_methods) or
+                'HTTP/1.' in payload or
+                'HTTP/2' in payload)
+
+    def _is_port_scanning(self, src_ip: str) -> bool:
+        """Check if an IP has recently been flagged for port scanning."""
+        now = time.time()
+        if src_ip not in self.scan_tracker:
+            return False
+        # Look at the timestamps of tracked port scan events
+        # If there's at least one event within the suppression window
+        for ts, _ in self.scan_tracker[src_ip]:
+            if now - ts < self.PORT_SCAN_SUPPRESSION_WINDOW:
+                return True
+        return False
+
     def detect_sql_injection(self, payload: str) -> DetectionResult:
         """Detect SQL Injection attacks"""
         for pattern in self.sql_patterns:
@@ -212,22 +243,31 @@ class AttackDetector:
         return DetectionResult(detected=False, category="", severity="", description="", payload="")
     
     def inspect_payload(self, payload: str, src_ip: str, dst_port: int) -> List[DetectionResult]:
-        """Inspect payload for all attack types"""
+        """Inspect payload for all attack types – only if it's a valid HTTP request
+        and the source IP is not currently port‑scanning."""
         results = []
         
         if not payload:
             return results
         
+        # Skip web attack inspection if:
+        # 1) destination port is not a web port, OR
+        # 2) payload is not an HTTP request, OR
+        # 3) source IP is actively port scanning (to avoid false positives)
+        if (dst_port not in self.WEB_PORTS or
+            not self._is_http_request(payload) or
+            self._is_port_scanning(src_ip)):
+            return results
+        
         # Web attacks (HTTP/S)
-        if dst_port in [80, 443, 8080, 8443]:
-            if result := self.detect_sql_injection(payload):
-                results.append(result)
-            if result := self.detect_xss(payload):
-                results.append(result)
-            if result := self.detect_command_injection(payload):
-                results.append(result)
-            if result := self.detect_path_traversal(payload):
-                results.append(result)
+        if result := self.detect_sql_injection(payload):
+            results.append(result)
+        if result := self.detect_xss(payload):
+            results.append(result)
+        if result := self.detect_command_injection(payload):
+            results.append(result)
+        if result := self.detect_path_traversal(payload):
+            results.append(result)
         
         return results
     

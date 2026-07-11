@@ -93,10 +93,10 @@ class AlertSystem:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         print(f"\n{color}{'='*60}{Style.RESET_ALL}")
-        print(f"{color}🚨 ALERT - {severity.upper()}{Style.RESET_ALL}")
-        print(f"{color}📅 Time: {timestamp}{Style.RESET_ALL}")
-        print(f"{color}📌 Title: {title}{Style.RESET_ALL}")
-        print(f"{color}📝 Description: {description}{Style.RESET_ALL}")
+        print(f"{color} ALERT - {severity.upper()}{Style.RESET_ALL}")
+        print(f"{color} Time: {timestamp}{Style.RESET_ALL}")
+        print(f"{color} Title: {title}{Style.RESET_ALL}")
+        print(f"{color} Description: {description}{Style.RESET_ALL}")
         if src_ip:
             print(f"{color}🌐 Source IP: {src_ip}{Style.RESET_ALL}")
         print(f"{color}{'='*60}{Style.RESET_ALL}\n")
@@ -164,12 +164,12 @@ class AlertSystem:
         """Send Telegram alert"""
         try:
             emoji = {
-                "critical": "🚨",
-                "high": "🔥",
-                "medium": "⚠️",
-                "low": "ℹ️",
-                "info": "🔔"
-            }.get(severity, "🔔")
+                "critical": "Critical",
+                "high": "high",
+                "medium": "medium",
+                "low": "low",
+                "info": "info"
+            }.get(severity, "info")
             
             message = f"""
             {emoji} *{severity.upper()} ALERT*

@@ -109,30 +109,30 @@ class ReportGenerator:
     def print_summary_report(self, report: Dict):
         """Print summary report to console"""
         print("\n" + "="*60)
-        print("📊 SECURITY SUMMARY REPORT")
+        print(" SECURITY SUMMARY REPORT")
         print("="*60)
-        print(f"📅 Period: Last {report['period_days']} days")
-        print(f"📅 Generated: {report['generated_at']}")
+        print(f" Period: Last {report['period_days']} days")
+        print(f" Generated: {report['generated_at']}")
         print("-"*60)
-        print(f"📌 Total Events: {report['total_events']}")
+        print(f" Total Events: {report['total_events']}")
         print("-"*60)
         
-        print("\n📋 Events by Type:")
+        print("\n Events by Type:")
         events_table = [[k, v] for k, v in report['events_by_type'].items()]
         print(tabulate(events_table, headers=['Type', 'Count'], tablefmt='grid'))
         
-        print("\n🔔 Alerts by Severity:")
+        print("\n Alerts by Severity:")
         alerts_table = [[k, v] for k, v in report['alerts_by_severity'].items()]
         print(tabulate(alerts_table, headers=['Severity', 'Count'], tablefmt='grid'))
         
-        print("\n🎯 Top Attackers:")
+        print("\n Top Attackers:")
         if report['top_attackers']:
             attackers_table = [[a['src_ip'], a['count']] for a in report['top_attackers']]
             print(tabulate(attackers_table, headers=['IP', 'Attacks'], tablefmt='grid'))
         else:
             print("No attackers detected")
         
-        print("\n⚔️ Top Attack Types:")
+        print("\n Top Attack Types:")
         if report['top_attack_types']:
             attacks_table = [[a['category'], a['count']] for a in report['top_attack_types']]
             print(tabulate(attacks_table, headers=['Type', 'Count'], tablefmt='grid'))
