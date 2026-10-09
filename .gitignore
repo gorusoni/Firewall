@@ -1,0 +1,26 @@
+# Captured data - these hold real traffic from whatever network PyFireSOC ran
+# on (addresses, hostnames, payloads). Keep them out of the repository.
+*.db
+*.db-wal
+*.db-shm
+*.log
+logs/
+reports/
+
+# Local configuration
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
