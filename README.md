@@ -93,8 +93,10 @@ secret can be supplied through an environment variable instead, so nothing
 sensitive has to be edited into the file:
 
 PYFIRESOC_INTERFACE        capture interface; auto-detected when unset
-PYFIRESOC_WHITELIST        comma-separated IPs that are never inspected
+PYFIRESOC_WHITELIST        extra comma-separated IPs that are never inspected
 PYFIRESOC_LOG_PERMITTED    set to 1 to log permitted traffic as well
+PYFIRESOC_ALL_TRAFFIC      set to 1 to also analyse established-connection
+                           replies (noisy; see What Gets Analysed)
 
 PYFIRESOC_EMAIL_ALERTS     set to 1 to enable email alerts
 PYFIRESOC_SMTP_SERVER      SMTP host (default smtp.gmail.com)
@@ -110,11 +112,29 @@ PYFIRESOC_TELEGRAM_ALERTS      set to 1 to enable Telegram alerts
 PYFIRESOC_TELEGRAM_BOT_TOKEN   bot token
 PYFIRESOC_TELEGRAM_CHAT_ID     chat id
 
-Add your own machine's address to PYFIRESOC_WHITELIST. Without it, the tool
-inspects its own outbound traffic and scores the host as a suspect.
+This machine's own addresses are detected and whitelisted automatically, so the
+monitor does not score its own outbound traffic and block the host it runs on.
+PYFIRESOC_WHITELIST adds others, such as the gateway or a known scanner. The
+whitelist in use is printed at start-up.
 
 If no interface is detected, the program lists the available interface names and
 exits, so the right one can be set in PYFIRESOC_INTERFACE.
+
+What Gets Analysed
+
+Sniffing an interface shows traffic in both directions, and most of it is the
+other half of connections this machine opened. Replies arrive on a random
+high-numbered local port, so counting them produces nonsense: a file download
+looks like a packet flood, and a few browser tabs look like a port sweep.
+
+So behavioural detection (port scan, SYN flood, DDoS) only counts traffic aimed
+at a service: connection attempts (TCP SYN), and packets to a port in
+PROTECTED_PORTS. Payload signatures only run on the cleartext ports in
+CLEARTEXT_HTTP_PORTS. Set PYFIRESOC_ALL_TRAFFIC=1 to examine everything, which
+is useful to see the difference but noisy on a normal desktop.
+
+The thresholds in config.py assume this narrower scope. Raise them if the lab
+network is busy, and lower them for a demo where the attack traffic is light.
 
 Running the Tests
 
@@ -162,6 +182,8 @@ This project is intended for learning and demonstration purposes. It is not a re
 Some limitations include:
 
 Detection only — packets are logged and alerted on, never dropped
+Only unsolicited, service-directed traffic is counted for behavioural
+detection, so an attack that hides inside an established connection is missed
 Signature-based detection, so novel attacks are missed and signatures can still
 misfire on unusual but legitimate traffic
 Payload inspection only works on cleartext ports (80 and 8080 by default);

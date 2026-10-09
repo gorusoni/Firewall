@@ -48,17 +48,17 @@ class AttackDetector:
         self.ddos_tracker = defaultdict(lambda: deque(maxlen=self.TRACKER_MAXLEN))
         self.blocked_ips = {}
         self._last_evict = time.time()
-        
+
         # Compile regex patterns
         self._compile_patterns()
-        
+
         # Load configuration
         from config import (
             PORT_SCAN_THRESHOLD, PORT_SCAN_WINDOW,
             SYN_FLOOD_THRESHOLD, BRUTE_FORCE_THRESHOLD,
             BRUTE_FORCE_WINDOW, DDOS_THRESHOLD, DDOS_WINDOW
         )
-        
+
         self.PORT_SCAN_THRESHOLD = PORT_SCAN_THRESHOLD
         self.PORT_SCAN_WINDOW = PORT_SCAN_WINDOW
         self.SYN_FLOOD_THRESHOLD = SYN_FLOOD_THRESHOLD
@@ -66,7 +66,7 @@ class AttackDetector:
         self.BRUTE_FORCE_WINDOW = BRUTE_FORCE_WINDOW
         self.DDOS_THRESHOLD = DDOS_THRESHOLD
         self.DDOS_WINDOW = DDOS_WINDOW
-    
+
     def _compile_patterns(self):
         """Compile attack detection patterns"""
         # Keyword-only patterns (e.g. a bare `INSERT ... INTO`) match ordinary
@@ -86,7 +86,7 @@ class AttackDetector:
             re.compile(r'(?i)\bLOAD_FILE\s*\('),
             re.compile(r'(?i)\bINTO\s+OUTFILE\b'),
         ]
-        
+
         self.xss_patterns = [
             re.compile(r'<\s*script[\s>]', re.I),
             re.compile(r'<\s*img\s+.*\bonerror\s*=', re.I),
@@ -99,7 +99,7 @@ class AttackDetector:
             re.compile(r'vbscript\s*:', re.I),
             re.compile(r'<\s*svg\s+.*\bonload\s*=', re.I),
         ]
-        
+
         # A command name on its own ("ping ", "netstat ") shows up in normal
         # traffic and prose, so require a shell metacharacter in front of it.
         shell_sep = r'(?:[;|&`]|\$\()\s*'
@@ -110,7 +110,7 @@ class AttackDetector:
             re.compile(r'(?i)' + shell_sep + r'(?:ping|nslookup|netstat|ifconfig|ipconfig)\s'),
             re.compile(r'(?i)' + shell_sep + r'(?:nc|bash|sh|powershell|cmd)\s'),
         ]
-        
+
         self.traversal_patterns = [
             re.compile(r'(?:\.\./){2,}'),
             re.compile(r'(?:\.\.\\){2,}'),
@@ -120,7 +120,7 @@ class AttackDetector:
             re.compile(r'(?i)C:\\Windows\\System32'),
             re.compile(r'boot\.ini'),
         ]
-    
+
     def detect_sql_injection(self, payload: str) -> DetectionResult:
         """Detect SQL Injection attacks"""
         for pattern in self.sql_patterns:
@@ -133,7 +133,7 @@ class AttackDetector:
                     payload=payload[:200]
                 )
         return no_detection()
-    
+
     def detect_xss(self, payload: str) -> DetectionResult:
         """Detect XSS attacks"""
         for pattern in self.xss_patterns:
@@ -146,7 +146,7 @@ class AttackDetector:
                     payload=payload[:200]
                 )
         return no_detection()
-    
+
     def detect_command_injection(self, payload: str) -> DetectionResult:
         """Detect Command Injection attacks"""
         for pattern in self.command_patterns:
@@ -159,7 +159,7 @@ class AttackDetector:
                     payload=payload[:200]
                 )
         return no_detection()
-    
+
     def detect_path_traversal(self, payload: str) -> DetectionResult:
         """Detect Path Traversal attacks"""
         for pattern in self.traversal_patterns:
@@ -172,16 +172,20 @@ class AttackDetector:
                     payload=payload[:200]
                 )
         return no_detection()
-    
+
     def detect_port_scan(self, src_ip: str, dst_port: int) -> DetectionResult:
-        """Detect Port Scan attempts"""
+        """Detect Port Scan attempts.
+
+        Only connection attempts reach here; see track_packet. Counting every
+        packet made ordinary traffic on ephemeral ports look like a sweep.
+        """
         now = time.time()
         self.scan_tracker[src_ip].append((now, dst_port))
-        
+
         # Check for multiple ports in time window
-        recent = [p for t, p in self.scan_tracker[src_ip] 
+        recent = [p for t, p in self.scan_tracker[src_ip]
                  if now - t < self.PORT_SCAN_WINDOW]
-        
+
         unique_ports = len(set(recent))
         if unique_ports >= self.PORT_SCAN_THRESHOLD:
             return DetectionResult(
@@ -192,15 +196,15 @@ class AttackDetector:
                 payload=f"Ports: {set(recent)}"
             )
         return no_detection()
-    
+
     def detect_syn_flood(self, src_ip: str) -> DetectionResult:
         """Detect SYN Flood attacks"""
         now = time.time()
         self.syn_tracker[src_ip].append(now)
-        
-        recent = [t for t in self.syn_tracker[src_ip] 
+
+        recent = [t for t in self.syn_tracker[src_ip]
                  if now - t < 1.0]  # Last second
-        
+
         if len(recent) > self.SYN_FLOOD_THRESHOLD:
             return DetectionResult(
                 detected=True,
@@ -210,15 +214,15 @@ class AttackDetector:
                 payload=f"Rate: {len(recent)} packets/sec"
             )
         return no_detection()
-    
+
     def detect_bruteforce(self, src_ip: str) -> DetectionResult:
         """Detect Brute Force attempts"""
         now = time.time()
         self.bruteforce_tracker[src_ip].append(now)
-        
-        recent = [t for t in self.bruteforce_tracker[src_ip] 
+
+        recent = [t for t in self.bruteforce_tracker[src_ip]
                  if now - t < self.BRUTE_FORCE_WINDOW]
-        
+
         if len(recent) >= self.BRUTE_FORCE_THRESHOLD:
             return DetectionResult(
                 detected=True,
@@ -228,15 +232,15 @@ class AttackDetector:
                 payload=f"Attempts: {len(recent)}"
             )
         return no_detection()
-    
+
     def detect_ddos(self, src_ip: str) -> DetectionResult:
         """Detect DDoS attacks"""
         now = time.time()
         self.ddos_tracker[src_ip].append(now)
-        
-        recent = [t for t in self.ddos_tracker[src_ip] 
+
+        recent = [t for t in self.ddos_tracker[src_ip]
                  if now - t < self.DDOS_WINDOW]
-        
+
         if len(recent) >= self.DDOS_THRESHOLD:
             return DetectionResult(
                 detected=True,
@@ -246,7 +250,7 @@ class AttackDetector:
                 payload=f"Rate: {len(recent)/self.DDOS_WINDOW:.0f} packets/sec"
             )
         return no_detection()
-    
+
     def inspect_payload(self, payload: str, src_ip: str, dst_port: int) -> List[DetectionResult]:
         """Inspect a cleartext payload for all attack types.
 
@@ -254,17 +258,17 @@ class AttackDetector:
         signatures over TLS bytes just produces noise.
         """
         results = []
-        
+
         if not payload:
             return results
-        
+
         for detect in (self.detect_sql_injection, self.detect_xss,
                        self.detect_command_injection, self.detect_path_traversal):
             if result := detect(payload):
                 results.append(result)
-        
+
         return results
-    
+
     def track_packet(self, src_ip: str, dst_port: int, is_syn: bool = False) -> DetectionResult:
         """Track packet for behavioral detection.
 
@@ -272,40 +276,41 @@ class AttackDetector:
         one would starve the later ones. The most severe detection is reported.
         """
         self._evict_idle_trackers()
-        
+
         detections = []
-        
+
         # Check SYN flood
         if is_syn:
             if result := self.detect_syn_flood(src_ip):
                 detections.append(result)
-        
-        # Check port scan
-        if result := self.detect_port_scan(src_ip, dst_port):
-            detections.append(result)
-        
+
+        # Check port scan, from connection attempts only
+        if is_syn:
+            if result := self.detect_port_scan(src_ip, dst_port):
+                detections.append(result)
+
         # Check DDoS
         if result := self.detect_ddos(src_ip):
             detections.append(result)
-        
+
         if not detections:
             return no_detection()
-        
+
         return max(detections, key=lambda r: SEVERITY_RANK.get(r.severity, 0))
-    
+
     def track_failure(self, src_ip: str) -> DetectionResult:
         """Track authentication failure"""
         if result := self.detect_bruteforce(src_ip):
             return result
         return no_detection()
-    
+
     def _evict_idle_trackers(self):
         """Drop per-IP state for IPs that have gone quiet"""
         now = time.time()
         if now - self._last_evict < self.IDLE_EVICT_SECONDS:
             return
         self._last_evict = now
-        
+
         cutoff = now - self.IDLE_EVICT_SECONDS
         # scan_tracker stores (timestamp, port); the others store bare timestamps
         for tracker, last_seen in (
@@ -317,10 +322,10 @@ class AttackDetector:
             for ip in [ip for ip, entries in tracker.items()
                        if not entries or last_seen(entries[-1]) < cutoff]:
                 del tracker[ip]
-        
+
         for ip in [ip for ip, until in self.blocked_ips.items() if until < now]:
             del self.blocked_ips[ip]
-    
+
     def is_blocked(self, ip: str) -> bool:
         """Check if IP is blocked"""
         if ip in self.blocked_ips:
@@ -329,7 +334,7 @@ class AttackDetector:
             else:
                 del self.blocked_ips[ip]
         return False
-    
+
     def block_ip(self, ip: str, duration: int = 300):
         """Block an IP address for specified duration"""
         self.blocked_ips[ip] = time.time() + duration

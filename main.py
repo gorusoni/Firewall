@@ -7,7 +7,7 @@ from datetime import datetime
 
 from scapy.all import sniff, IP, TCP, UDP, Raw
 
-from config import INTERFACE, LOG_FILE, DB_PATH, REPORT_DIR, DB_PATH, REPORT_DIR
+from config import INTERFACE, LOG_FILE, DB_PATH, REPORT_DIR, WHITELIST, DB_PATH, REPORT_DIR
 from database import Database
 from detectors import AttackDetector
 from alerts import AlertSystem
@@ -38,6 +38,7 @@ def print_banner():
     print(banner)
     print(f"[*] Started At : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[*] Interface  : {INTERFACE}")
+    print(f"[*] Whitelist  : {', '.join(WHITELIST) or '(none)'}")
     print(f"[*] Log File   : {LOG_FILE}")
     print()
 

@@ -78,8 +78,17 @@ class TestPayloadSignatures(unittest.TestCase):
 class TestBehaviouralDetection(unittest.TestCase):
     def test_port_scan(self):
         detector = AttackDetector()
-        detected = [detector.track_packet("10.0.0.1", port) for port in range(20, 40)]
+        ports = range(20, 20 + detector.PORT_SCAN_THRESHOLD + 5)
+        detected = [detector.track_packet("10.0.0.1", port, is_syn=True) for port in ports]
         self.assertTrue(any(r and r.category == "port_scan" for r in detected))
+
+    def test_established_traffic_is_not_a_port_scan(self):
+        """Regression: replies on ephemeral ports registered as a sweep"""
+        detector = AttackDetector()
+        # Replies from one server arriving on many local ephemeral ports
+        detected = [detector.track_packet("10.0.0.9", port)
+                    for port in range(50000, 50000 + detector.PORT_SCAN_THRESHOLD + 20)]
+        self.assertFalse(any(r and r.category == "port_scan" for r in detected))
 
     def test_ddos_is_reachable(self):
         """Regression: track_packet returned early, so detect_ddos never ran"""
@@ -126,6 +135,77 @@ class TestBehaviouralDetection(unittest.TestCase):
         detector = AttackDetector()
         detector.block_ip("10.0.0.8", duration=60)
         self.assertTrue(detector.is_blocked("10.0.0.8"))
+
+
+class TestFirewallScope(unittest.TestCase):
+    """Policy-level checks for what traffic is examined at all"""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import config
+            from alerts import AlertSystem
+            from firewall import Firewall
+        except ImportError as e:
+            raise unittest.SkipTest(f"optional dependency missing: {e}")
+        cls.config = config
+        cls.AlertSystem = AlertSystem
+        cls.Firewall = Firewall
+
+    def setUp(self):
+        handle, self.path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        self.db = Database(self.path)
+        self.alerts = self.AlertSystem(self.db)
+        self.alerts.console_enabled = False
+        self.fw = self.Firewall(self.db, AttackDetector(), self.alerts)
+
+    def tearDown(self):
+        self.db.close()
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(self.path + suffix)
+            except OSError:
+                pass
+
+    def test_this_host_is_whitelisted(self):
+        """Regression: the monitor scored its own traffic and blocked itself"""
+        self.assertIn("127.0.0.1", self.config.WHITELIST)
+        self.assertTrue(self.fw.process_packet("127.0.0.1", "10.0.0.1", 80, "TCP", "", False))
+
+    def test_local_addresses_are_detected(self):
+        self.assertTrue(self.config._local_addresses())
+
+    def test_reply_traffic_does_not_trigger_ddos(self):
+        """Regression: a download from one server tripped the DDoS threshold"""
+        allowed = [self.fw.process_packet("203.0.113.20", "10.0.0.1", 51000 + n,
+                                          "TCP", "", False)
+                   for n in range(self.config.DDOS_THRESHOLD * 2)]
+        self.assertTrue(all(allowed))
+
+    def test_service_directed_flood_still_detected(self):
+        blocked = any(not self.fw.process_packet("203.0.113.21", "10.0.0.1", 80,
+                                                 "TCP", "", False)
+                      for _ in range(self.config.DDOS_THRESHOLD * 2))
+        self.assertTrue(blocked)
+
+    def test_blocked_ip_is_logged_once(self):
+        """Regression: one console line per packet made the output unusable"""
+        self.fw._block_ip("203.0.113.22")
+        with self.assertLogs("firewall", level="INFO") as captured:
+            for _ in range(50):
+                self.fw.process_packet("203.0.113.22", "10.0.0.1", 80, "TCP", "", False)
+            drops = [line for line in captured.output if "blocked IP" in line]
+        self.assertEqual(1, len(drops))
+
+    def test_tls_port_is_not_signature_inspected(self):
+        payload = "\x16\x03\x01<script>alert(1)</script>"
+        self.assertTrue(self.fw.process_packet("203.0.113.23", "10.0.0.1", 443,
+                                               "TCP", payload, False))
+
+    def test_cleartext_attack_is_blocked(self):
+        self.assertFalse(self.fw.process_packet("203.0.113.24", "10.0.0.1", 80, "TCP",
+                                                "GET /?id=1' OR '1'='1", False))
 
 
 class TestDatabase(unittest.TestCase):

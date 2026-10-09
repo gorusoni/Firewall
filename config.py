@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-# BASE PATHS 
+# BASE PATHS
 BASE_DIR = Path(__file__).parent.absolute()
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 REPORT_DIR = os.path.join(BASE_DIR, "reports")
@@ -11,7 +11,7 @@ DB_PATH = os.path.join(BASE_DIR, "firewall.db")
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(REPORT_DIR, exist_ok=True)
 
-# FIREWALL SETTINGS 
+# FIREWALL SETTINGS
 # INTERFACE can be overridden with the PYFIRESOC_INTERFACE environment
 # variable, e.g. "\Device\NPF_{5F9CD09C-...}" on Windows.
 def _default_interface():
@@ -24,10 +24,34 @@ def _default_interface():
 
 INTERFACE = os.environ.get("PYFIRESOC_INTERFACE") or _default_interface()
 
-# Hosts that are never inspected or blocked. Put this machine's own address
-# here, otherwise its own outbound traffic gets scored as if it were an
-# attacker. Comma-separated PYFIRESOC_WHITELIST overrides it.
-WHITELIST = [ip for ip in os.environ.get("PYFIRESOC_WHITELIST", "").split(",") if ip]
+def _local_addresses():
+    """Addresses belonging to this machine.
+
+    Traffic sent *by* this host appears on the interface with the host as
+    source. Without whitelisting these, the monitor scores its own outbound
+    traffic and eventually blocks the machine it is running on.
+    """
+    ips = {"127.0.0.1", "::1"}
+    try:
+        import socket
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ips.add(info[4][0])
+    except Exception:
+        pass
+    try:
+        from scapy.all import get_if_addr, conf
+        if address := get_if_addr(conf.iface):
+            ips.add(address)
+    except Exception:
+        pass
+    return {ip for ip in ips if ip and ip != "0.0.0.0"}
+
+
+# Hosts that are never inspected or blocked. This machine's own addresses are
+# always included; PYFIRESOC_WHITELIST adds more, comma-separated.
+WHITELIST = sorted(_local_addresses().union(
+    ip.strip() for ip in os.environ.get("PYFIRESOC_WHITELIST", "").split(",") if ip.strip()
+))
 BLACKLIST = []
 
 PROTECTED_PORTS = [22, 23, 80, 443, 445, 3306, 3389, 5432, 8080, 8443]
@@ -46,19 +70,29 @@ REPUTATION_BLOCK_SCORE = 70
 
 # ==================== ATTACK DETECTION THRESHOLDS ====================
 
-PORT_SCAN_THRESHOLD = 5  # Number of different ports hit in X seconds
+# Counted from connection attempts (SYN) only, so established traffic on
+# random high ports is not mistaken for a sweep.
+PORT_SCAN_THRESHOLD = 15  # Distinct ports probed within the window
 PORT_SCAN_WINDOW = 10     # Time window in seconds
 
 # SYN Flood detection
-SYN_FLOOD_THRESHOLD = 20  # SYN packets per second
+SYN_FLOOD_THRESHOLD = 60  # SYN packets per second from a single IP
 
-# Brute Force detection
-BRUTE_FORCE_THRESHOLD = 3  # Failed attempts per minute
-BRUTE_FORCE_WINDOW = 60     # Time window in seconds
+# Brute Force detection. Measured as connection attempts to an auth port; TCP
+# retransmits a SYN two or three times on its own, so this cannot be tiny.
+BRUTE_FORCE_THRESHOLD = 15  # Connection attempts per window
+BRUTE_FORCE_WINDOW = 60      # Time window in seconds
 
-# DDoS detection
-DDOS_THRESHOLD = 30       # Packets per second from single IP
+# DDoS detection. Only service-directed traffic is counted (see
+# SERVICE_TRAFFIC_ONLY), so this is a rate of unsolicited packets - the old
+# default of 30 per 10s was 3 packets/sec, which any download exceeds.
+DDOS_THRESHOLD = 400      # Packets within the window from a single IP
 DDOS_WINDOW = 10           # Time window in seconds
+
+# Restrict behavioural detection to traffic aimed at services: SYN packets and
+# packets to a protected port. Return traffic of connections this host opened
+# arrives on random ephemeral ports and is not an attack signal.
+SERVICE_TRAFFIC_ONLY = os.environ.get("PYFIRESOC_ALL_TRAFFIC", "0") != "1"
 
 # ==================== ALERT SETTINGS ====================
 # Console alerts
