@@ -7,11 +7,12 @@ from datetime import datetime
 
 from scapy.all import sniff, IP, TCP, UDP, Raw
 
-from config import INTERFACE, LOG_FILE
+from config import INTERFACE, LOG_FILE, DB_PATH, REPORT_DIR, DB_PATH, REPORT_DIR
 from database import Database
 from detectors import AttackDetector
 from alerts import AlertSystem
 from firewall import Firewall
+from console import safe_print, enable_utf8_stdout
 from soc import SecurityOperationsCenter
 from reporting import ReportGenerator
 
@@ -28,10 +29,11 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 def print_banner():
+    enable_utf8_stdout()
     banner = """
-         PyFireSOC - Firewall & SOC Platform    
-                Author : Gourav Soni                    
-   
+         PyFireSOC - Firewall & SOC Platform
+                Author : Gourav Soni
+
     """
     print(banner)
     print(f"[*] Started At : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -81,11 +83,15 @@ def packet_callback(packet):
 
 def start_sniffer():
     print("[+] Packet sniffer started")
-    sniff(
-        iface=INTERFACE,
-        prn=packet_callback,
-        store=False
-    )
+    try:
+        sniff(
+            iface=INTERFACE,
+            prn=packet_callback,
+            store=False
+        )
+    except Exception as e:
+        print(f"\n[!] Sniffer stopped: {e}")
+        print("[!] Check the interface name and run as Administrator/root")
 
 def main():
     global firewall_instance
@@ -99,9 +105,20 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
 
     print_banner()
+
+    if not INTERFACE:
+        print("[!] No capture interface found. Set PYFIRESOC_INTERFACE to one of:")
+        try:
+            from scapy.all import get_if_list
+            for iface in get_if_list():
+                print(f"      {iface}")
+        except Exception as e:
+            print(f"      (could not list interfaces: {e})")
+        return 1
+
     print("[*] Initializing components...")
 
-    db = Database("firewall.db")
+    db = Database(DB_PATH)
     detector = AttackDetector()
     alerts = AlertSystem(db)
     soc = SecurityOperationsCenter(db, alerts)
@@ -129,8 +146,8 @@ def main():
         while True:
             time.sleep(2)
             stats = firewall_instance.get_stats()
-            print(
-                f"\r📊 Packets: {stats['total_packets']} | "
+            safe_print(
+                f"\r[stats] Packets: {stats['total_packets']} | "
                 f"Blocked: {stats['blocked_packets']} | "
                 f"Alerts: {stats['alerts_triggered']}",
                 end=""
@@ -144,4 +161,4 @@ def main():
         print("[+] Goodbye")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

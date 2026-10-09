@@ -1,11 +1,13 @@
-PyFireSOC – Python Firewall & SOC Project
+PyFireSOC – Python Network Monitor & SOC Project
 About the Project
 
-PyFireSOC is a Python-based Firewall and Security Operations Center (SOC) project developed as part of my Cyber Security learning. The main objective of this project is to monitor network traffic, detect common cyber attacks, log security events, and generate alerts.
+PyFireSOC is a Python-based network monitoring and Security Operations Center (SOC) project developed as part of my Cyber Security learning. The main objective of this project is to monitor network traffic, detect common cyber attacks, log security events, and generate alerts.
 
 The project uses packet sniffing to inspect network traffic and applies different detection techniques to identify suspicious activities such as port scanning, SYN flooding, SQL Injection, XSS, brute force attacks, and other common threats.
 
 This project is developed for educational purposes to understand how firewalls and intrusion detection systems work.
+
+A note on the name: PyFireSOC detects and records attacks, but it does not drop packets. Scapy's sniffer is read-only, so a packet marked as blocked is logged, alerted on, and added to an internal block list — it still reaches the operating system. It is an IDS (detection), not an inline firewall (prevention). Adding real enforcement is listed under Future Improvements.
 
 Features
 Real-time packet monitoring
@@ -42,21 +44,28 @@ PyFireSOC/
 ├── reporting.py
 ├── soc.py
 ├── config.py
+├── console.py
+├── test_detectors.py
 │
-├── logs/
+├── logs/            (created on first run)
 │
-├── reports/
-│
-├── firewall.db
+├── reports/         (created on first run)
 │
 ├── requirements.txt
 │
+├── .gitignore
+│
 └── README.md
+
+The database (firewall.db), the log file and the generated reports are created at
+runtime and are deliberately not tracked by git — they contain real captured
+traffic from whatever network the tool was run on.
+
 Installation
 1. Clone the repository
-git clone https://github.com/your-username/PyFireSOC.git
+git clone https://github.com/gorusoni/Firewall.git
 2. Open the project folder
-cd PyFireSOC
+cd Firewall
 3. Install the required packages
 pip install -r requirements.txt
 4. Run the project
@@ -64,6 +73,9 @@ pip install -r requirements.txt
 Open Command Prompt or PowerShell as Administrator and run:
 
 python main.py
+
+Packet capture needs Administrator privileges on Windows (and root on Linux). On Windows, Npcap must be installed for Scapy to see an interface.
+
 Required Python Packages
 scapy
 requests
@@ -73,6 +85,44 @@ tabulate
 Install them manually if required:
 
 pip install scapy requests colorama tabulate
+
+Configuration
+
+Defaults live in config.py and every setting that is environment-specific or
+secret can be supplied through an environment variable instead, so nothing
+sensitive has to be edited into the file:
+
+PYFIRESOC_INTERFACE        capture interface; auto-detected when unset
+PYFIRESOC_WHITELIST        comma-separated IPs that are never inspected
+PYFIRESOC_LOG_PERMITTED    set to 1 to log permitted traffic as well
+
+PYFIRESOC_EMAIL_ALERTS     set to 1 to enable email alerts
+PYFIRESOC_SMTP_SERVER      SMTP host (default smtp.gmail.com)
+PYFIRESOC_SMTP_PORT        SMTP port (default 587)
+PYFIRESOC_SMTP_USERNAME    SMTP user
+PYFIRESOC_SMTP_PASSWORD    SMTP password or app password
+PYFIRESOC_ALERT_EMAIL      where alerts are sent
+
+PYFIRESOC_SLACK_ALERTS     set to 1 to enable Slack alerts
+PYFIRESOC_SLACK_WEBHOOK    Slack incoming webhook URL
+
+PYFIRESOC_TELEGRAM_ALERTS      set to 1 to enable Telegram alerts
+PYFIRESOC_TELEGRAM_BOT_TOKEN   bot token
+PYFIRESOC_TELEGRAM_CHAT_ID     chat id
+
+Add your own machine's address to PYFIRESOC_WHITELIST. Without it, the tool
+inspects its own outbound traffic and scores the host as a suspect.
+
+If no interface is detected, the program lists the available interface names and
+exits, so the right one can be set in PYFIRESOC_INTERFACE.
+
+Running the Tests
+
+The detection logic and the database layer are covered by unit tests that need
+no network access and no Administrator privileges:
+
+python -m unittest discover -v
+
 How the Project Works
 The application starts packet sniffing using Scapy.
 Captured packets are analyzed one by one.
@@ -101,13 +151,22 @@ Event history
 
 Reports can be exported in JSON and CSV formats.
 
+Generate one on demand:
+
+python main.py --generate-report --report-days 7
+
 Limitations
 
 This project is intended for learning and demonstration purposes. It is not a replacement for commercial firewall or enterprise security products.
 
 Some limitations include:
 
-Signature-based detection only
+Detection only — packets are logged and alerted on, never dropped
+Signature-based detection, so novel attacks are missed and signatures can still
+misfire on unusual but legitimate traffic
+Payload inspection only works on cleartext ports (80 and 8080 by default);
+traffic on 443 is encrypted and cannot be matched against signatures
+Brute force is inferred from connection rate, not from actual failed logins
 Requires Administrator privileges for packet capture
 SQLite database is suitable only for small-scale projects
 Tested in a local lab environment
@@ -120,7 +179,8 @@ GeoIP lookup
 Real-time web dashboard
 PDF report generation
 Integration with threat intelligence feeds
-Automatic Windows Firewall rule creation
+Automatic Windows Firewall rule creation, to make the blocking real
+TLS-terminating proxy so HTTPS payloads can be inspected
 What I Learned
 
 While developing this project, I learned about:
